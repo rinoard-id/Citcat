@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Citcat Admin - Global Chat History & Statistics</title>
+  <link rel="stylesheet" href="history.css">
+</head>
+<body>
+  <!-- Login Overlay -->
+  <div id="login-container" class="login-container">
+    <div class="login-box">
+      <div class="login-logo">🐱</div>
+      <h2>Citcat Admin Portal</h2>
+      <p>Akses History & Statistik Seluruh User</p>
+      <form id="login-form">
+        <div class="input-group">
+          <label for="username">Username Admin</label>
+          <input type="text" id="username" required autocomplete="username">
+        </div>
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" required autocomplete="current-password">
+        </div>
+        <div id="login-error" class="login-error"></div>
+        <button type="submit" class="btn-primary">Masuk Dashboard</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main Dashboard -->
+  <div id="dashboard-container" class="dashboard-container hidden">
+    <header class="dashboard-header">
+      <div class="header-title">
+        <span class="logo-icon">🐱</span>
+        <h1>Citcat Global History & Statistics</h1>
+      </div>
+      <div class="header-actions">
+        <span id="admin-user-display" class="admin-badge">Admin: rinoard</span>
+        <button id="btn-refresh" class="btn-secondary">🔄 Refresh Data</button>
+        <button id="btn-logout" class="btn-danger">Keluar</button>
+      </div>
+    </header>
+
+    <!-- Statistics Cards -->
+    <section class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon users-icon">👥</div>
+        <div class="stat-info">
+          <h3 id="stat-total-users">0</h3>
+          <p>Total Pengguna</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon online-icon">🟢</div>
+        <div class="stat-info">
+          <h3 id="stat-online-users">0</h3>
+          <p>Pengguna Online</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon messages-icon">💬</div>
+        <div class="stat-info">
+          <h3 id="stat-total-messages">0</h3>
+          <p>Total Pesan Aktif</p>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon trash-icon">🗑️</div>
+        <div class="stat-info">
+          <h3 id="stat-total-trash">0</h3>
+          <p>Pesan di Trash</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Filters & Search Toolbar -->
+    <section class="toolbar">
+      <div class="search-box">
+        <input type="text" id="search-input" placeholder="🔍 Filter berdasarkan isi chat atau nama user (pengirim/penerima)...">
+      </div>
+      <div class="filter-tabs">
+        <button class="tab-btn active" data-tab="messages">Semua Chat</button>
+        <button class="tab-btn" data-tab="users">Daftar Pengguna</button>
+        <button class="tab-btn" data-tab="trash">Trash (Sampah)</button>
+      </div>
+    </section>
+
+    <!-- Content Sections -->
+    <main class="content-area">
+      <!-- Messages Tab -->
+      <div id="tab-messages" class="tab-content active">
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Waktu</th>
+                <th>Pengirim</th>
+                <th>Penerima</th>
+                <th>Isi Pesan</th>
+                <th>Status</th>
+                <th>ID</th>
+              </tr>
+            </thead>
+            <tbody id="messages-tbody">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Users Tab -->
+      <div id="tab-users" class="tab-content">
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Avatar</th>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Socket ID</th>
+                <th>Total Pesan Dikirim</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Trash Tab -->
+      <div id="tab-trash" class="tab-content">
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Dihapus Pada</th>
+                <th>Pengirim</th>
+                <th>Penerima</th>
+                <th>Isi Pesan</th>
+                <th>Waktu Asli</th>
+              </tr>
+            </thead>
+            <tbody id="trash-tbody">
+              <!-- Populated via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="history.js"></script>
+</body>
+</html>

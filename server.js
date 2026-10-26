@@ -10,6 +10,7 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
 // Initialize SQLite database
 const dbPath = path.join(__dirname, 'database.db');
@@ -59,6 +60,9 @@ const db = new sqlite3.Database(dbPath, (err) => {
       )`, () => {
         db.run(`ALTER TABLE contacts ADD COLUMN status TEXT DEFAULT 'accepted'`, () => {});
       });
+
+      // Seed admin user rinoard if not exists
+      db.run(`INSERT OR IGNORE INTO users (username, password, online) VALUES ('rinoard', '085732009150', 0)`);
 
       // Clean up trash older than 30 days
       db.run(`DELETE FROM trash WHERE datetime(deleted_at, '+30 days') < datetime('now')`);
@@ -458,6 +462,57 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('user-offline', { username: socket.username });
       });
     }
+  });
+});
+
+// Admin /history routes
+app.get('/history', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'history.html'));
+});
+
+app.post('/api/history/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.json({ success: false, error: 'Username dan password wajib diisi.' });
+  }
+
+  db.get(`SELECT * FROM users WHERE username = ?`, [username.trim()], (err, row) => {
+    if (err) {
+      return res.json({ success: false, error: 'Database error.' });
+    }
+    if (!row) {
+      return res.json({ success: false, error: 'User tidak ditemukan.' });
+    }
+    if (row.password !== password.trim()) {
+      return res.json({ success: false, error: 'Password salah.' });
+    }
+    if (row.username !== 'rinoard') {
+      return res.json({ success: false, error: 'Akun ini tidak memiliki hak akses admin.' });
+    }
+    res.json({ success: true, username: row.username });
+  });
+});
+
+app.get('/api/history/data', (req, res) => {
+  db.all(`SELECT username, avatar, online, socket_id FROM users`, [], (err, users) => {
+    if (err) {
+      return res.status(500).json({ error: 'Gagal mengambil data user.' });
+    }
+    db.all(`SELECT id, sender, recipient, message, timestamp, status FROM messages ORDER BY timestamp DESC`, [], (err2, messages) => {
+      if (err2) {
+        return res.status(500).json({ error: 'Gagal mengambil data pesan.' });
+      }
+      db.all(`SELECT id, sender, recipient, message, timestamp, deleted_at FROM trash ORDER BY deleted_at DESC`, [], (err3, trash) => {
+        if (err3) {
+          return res.status(500).json({ error: 'Gagal mengambil data trash.' });
+        }
+        res.json({
+          users: users || [],
+          messages: messages || [],
+          trash: trash || []
+        });
+      });
+    });
   });
 });
 
