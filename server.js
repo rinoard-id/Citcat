@@ -54,8 +54,11 @@ const db = new sqlite3.Database(dbPath, (err) => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user TEXT,
         contact TEXT,
+        status TEXT DEFAULT 'accepted',
         UNIQUE(user, contact)
-      )`);
+      )`, () => {
+        db.run(`ALTER TABLE contacts ADD COLUMN status TEXT DEFAULT 'accepted'`, () => {});
+      });
 
       // Clean up trash older than 30 days
       db.run(`DELETE FROM trash WHERE datetime(deleted_at, '+30 days') < datetime('now')`);
@@ -124,15 +127,22 @@ io.on('connection', (socket) => {
     socket.username = username;
     console.log(`User registered: ${username} (${socket.id})`);
 
-    // Strictly return ONLY contacts explicitly added by this user in contacts table
+    // Return accepted contacts and pending requests
     db.all(`
       SELECT u.username, u.online, u.avatar 
       FROM users u
       JOIN contacts c ON c.contact = u.username
-      WHERE c.user = ?
-    `, [username], (err, rows) => {
-      callback({ success: true, username, avatar, users: rows || [] });
-      socket.broadcast.emit('user-online', { username, avatar });
+      WHERE c.user = ? AND c.status = 'accepted'
+    `, [username], (err, contactRows) => {
+      db.all(`
+        SELECT u.username, u.online, u.avatar 
+        FROM users u
+        JOIN contacts c ON c.contact = u.username
+        WHERE c.user = ? AND c.status = 'pending'
+      `, [username], (err2, pendingRows) => {
+        callback({ success: true, username, avatar, users: contactRows || [], pendingRequests: pendingRows || [] });
+        socket.broadcast.emit('user-online', { username, avatar });
+      });
     });
   }
 
@@ -149,7 +159,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Search user (Does NOT auto-add contact)
+  // Search user
   socket.on('search-user', ({ targetUsername }, callback) => {
     targetUsername = targetUsername ? targetUsername.trim() : '';
     if (!targetUsername) return callback({ success: false, error: 'Username tidak boleh kosong.' });
@@ -165,21 +175,73 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Add Contact explicitly
+  // Add Contact explicitly (Sends contact request)
   socket.on('add-contact', ({ targetUsername }, callback) => {
     if (!socket.username || !targetUsername) return callback({ success: false, error: 'Invalid data.' });
     if (targetUsername === socket.username) return callback({ success: false, error: 'Tidak dapat menambahkan diri sendiri.' });
 
-    db.get(`SELECT username, online, avatar FROM users WHERE username = ?`, [targetUsername], (err, row) => {
+    db.get(`SELECT username, online, avatar, socket_id FROM users WHERE username = ?`, [targetUsername], (err, row) => {
       if (!row) return callback({ success: false, error: 'Pengguna tidak ditemukan.' });
 
-      db.run(`INSERT OR IGNORE INTO contacts (user, contact) VALUES (?, ?)`, [socket.username, targetUsername], (insErr) => {
-        if (!insErr) {
-          callback({ success: true, user: row });
-        } else {
-          callback({ success: false, error: 'Gagal menambahkan kontak.' });
+      db.get(`SELECT status FROM contacts WHERE (user = ? AND contact = ?) OR (user = ? AND contact = ?)`, 
+        [socket.username, targetUsername, targetUsername, socket.username], (relErr, relRow) => {
+        if (relRow) {
+          if (relRow.status === 'accepted') {
+            return callback({ success: false, error: 'Sudah menjadi kontak.' });
+          } else {
+            return callback({ success: false, error: 'Permintaan kontak sudah dikirim / pending.' });
+          }
         }
+
+        db.run(`INSERT INTO contacts (user, contact, status) VALUES (?, ?, 'pending')`, [targetUsername, socket.username], (insErr) => {
+          if (!insErr) {
+            if (row.socket_id) {
+              io.to(row.socket_id).emit('contact-request', { username: socket.username, avatar: socket.avatar || null });
+            }
+            callback({ success: true, message: 'Permintaan kontak berhasil dikirim.' });
+          } else {
+            callback({ success: false, error: 'Gagal mengirim permintaan kontak.' });
+          }
+        });
       });
+    });
+  });
+
+  // Approve Contact Request
+  socket.on('approve-contact', ({ requesterUsername }, callback) => {
+    if (!socket.username || !requesterUsername) return callback({ success: false, error: 'Invalid data.' });
+
+    db.run(`UPDATE contacts SET status = 'accepted' WHERE user = ? AND contact = ? AND status = 'pending'`, 
+      [socket.username, requesterUsername], function(err) {
+      if (err || this.changes === 0) {
+        return callback({ success: false, error: 'Permintaan tidak ditemukan.' });
+      }
+
+      db.run(`INSERT OR REPLACE INTO contacts (user, contact, status) VALUES (?, ?, 'accepted')`, 
+        [requesterUsername, socket.username], (revErr) => {
+        
+        db.get(`SELECT username, online, avatar, socket_id FROM users WHERE username = ?`, [requesterUsername], (reqErr, reqRow) => {
+          if (reqRow && reqRow.socket_id) {
+            db.get(`SELECT avatar FROM users WHERE username = ?`, [socket.username], (myErr, myRow) => {
+              io.to(reqRow.socket_id).emit('contact-approved', { username: socket.username, avatar: myRow ? myRow.avatar : null });
+            });
+          }
+          callback({ success: true, user: reqRow });
+        });
+      });
+    });
+  });
+
+  // Reject Contact Request
+  socket.on('reject-contact', ({ requesterUsername }, callback) => {
+    if (!socket.username || !requesterUsername) return callback({ success: false, error: 'Invalid data.' });
+
+    db.run(`DELETE FROM contacts WHERE user = ? AND contact = ? AND status = 'pending'`, 
+      [socket.username, requesterUsername], (err) => {
+      if (err) {
+        return callback({ success: false, error: 'Gagal menolak permintaan.' });
+      }
+      callback({ success: true });
     });
   });
 

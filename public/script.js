@@ -3,6 +3,120 @@ const socket = io();
 let myUsername = '';
 let activeRecipient = null;
 const conversations = {}; // username -> { messages: [], online: boolean, avatar: string, unread: 0 }
+let pendingRequests = [];
+
+// Contact requests UI elements
+const pendingRequestsContainer = document.getElementById('pending-requests-container');
+const pendingRequestsList = document.getElementById('pending-requests-list');
+const pendingCount = document.getElementById('pending-count');
+
+function renderPendingRequests() {
+  if (!pendingRequestsList) return;
+  pendingRequestsList.innerHTML = '';
+  if (pendingRequests.length === 0) {
+    if (pendingRequestsContainer) pendingRequestsContainer.style.display = 'none';
+    return;
+  }
+  if (pendingRequestsContainer) pendingRequestsContainer.style.display = 'block';
+  if (pendingCount) pendingCount.textContent = pendingRequests.length;
+
+  pendingRequests.forEach((req) => {
+    const item = document.createElement('div');
+    item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: white; padding: 8px 12px; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);';
+    
+    const left = document.createElement('div');
+    left.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+    
+    const av = document.createElement('div');
+    av.className = 'avatar small';
+    if (req.avatar) {
+      av.style.backgroundImage = `url(${req.avatar})`;
+      av.textContent = '';
+    } else {
+      av.textContent = req.username.charAt(0).toUpperCase();
+    }
+    
+    const nameEl = document.createElement('span');
+    nameEl.style.cssText = 'font-weight: 600; font-size: 0.95rem; color: var(--ios-text-dark);';
+    nameEl.textContent = req.username;
+    
+    left.appendChild(av);
+    left.appendChild(nameEl);
+
+    const right = document.createElement('div');
+    right.style.cssText = 'display: flex; gap: 6px;';
+
+    const acceptBtn = document.createElement('button');
+    acceptBtn.className = 'call-btn accept';
+    acceptBtn.style.cssText = 'width: auto; height: 28px; padding: 0 10px; font-size: 0.8rem; border-radius: 6px;';
+    acceptBtn.innerHTML = '<i class="fa-solid fa-check"></i> Terima';
+    acceptBtn.onclick = () => {
+      socket.emit('approve-contact', { requesterUsername: req.username }, (res) => {
+        if (res.success) {
+          pendingRequests = pendingRequests.filter(r => r.username !== req.username);
+          renderPendingRequests();
+          if (res.user) {
+            const u = res.user;
+            if (!conversations[u.username]) {
+              conversations[u.username] = {
+                messages: [],
+                online: u.online === 1,
+                avatar: u.avatar,
+                unread: 0
+              };
+            }
+            renderConversations();
+            openChat(u.username);
+          }
+        } else {
+          alert(res.error || 'Gagal menyetujui kontak.');
+        }
+      });
+    };
+
+    const rejectBtn = document.createElement('button');
+    rejectBtn.className = 'call-btn reject';
+    rejectBtn.style.cssText = 'width: auto; height: 28px; padding: 0 10px; font-size: 0.8rem; border-radius: 6px;';
+    rejectBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Tolak';
+    rejectBtn.onclick = () => {
+      socket.emit('reject-contact', { requesterUsername: req.username }, (res) => {
+        if (res.success) {
+          pendingRequests = pendingRequests.filter(r => r.username !== req.username);
+          renderPendingRequests();
+        } else {
+          alert(res.error || 'Gagal menolak kontak.');
+        }
+      });
+    };
+
+    right.appendChild(acceptBtn);
+    right.appendChild(rejectBtn);
+
+    item.appendChild(left);
+    item.appendChild(right);
+    pendingRequestsList.appendChild(item);
+  });
+}
+
+socket.on('contact-request', ({ username, avatar }) => {
+  if (!pendingRequests.some(r => r.username === username)) {
+    pendingRequests.push({ username, online: 1, avatar });
+    renderPendingRequests();
+  }
+});
+
+socket.on('contact-approved', ({ username, avatar }) => {
+  if (!conversations[username]) {
+    conversations[username] = {
+      messages: [],
+      online: true,
+      avatar,
+      unread: 0
+    };
+    renderConversations();
+    alert(`Permintaan kontak Anda ke ${username} telah disetujui!`);
+  }
+});
 
 // DOM Elements
 const loginOverlay = document.getElementById('login-overlay');
@@ -162,7 +276,9 @@ function loginWithCredentials(username, password) {
           unread: 0
         };
       });
+      pendingRequests = response.pendingRequests || [];
       renderConversations();
+      renderPendingRequests();
     } else {
       loginError.textContent = response.error || 'Gagal masuk.';
     }
@@ -911,6 +1027,22 @@ function openContactInfo() {
     infoAvatar.textContent = activeRecipient.charAt(0).toUpperCase();
   }
 
+  // Generate QR code for contact
+  const infoQrcodeEl = document.getElementById('info-qrcode');
+  if (infoQrcodeEl) {
+    infoQrcodeEl.innerHTML = '';
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(infoQrcodeEl, {
+        text: `citcat:add:${activeRecipient}`,
+        width: 130,
+        height: 130,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
+  }
+
   // Populate shared media gallery
   infoMediaGallery.innerHTML = '';
   const messages = conversations[activeRecipient].messages || [];
@@ -1155,3 +1287,68 @@ document.addEventListener('click', (e) => {
     chatDropdownMenu.style.display = 'none';
   }
 });
+
+// QR Scanner Elements & Logic
+const scanQrBtn = document.getElementById('scan-qr-btn');
+const qrScannerModal = document.getElementById('qr-scanner-modal');
+const qrScannerCloseBtn = document.getElementById('qr-scanner-close-btn');
+let html5QrCode = null;
+
+if (scanQrBtn) {
+  scanQrBtn.addEventListener('click', () => {
+    qrScannerModal.style.display = 'flex';
+    html5QrCode = new Html5Qrcode("reader");
+    html5QrCode.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      (decodedText) => {
+        html5QrCode.stop().then(() => {
+          qrScannerModal.style.display = 'none';
+          handleScannedQR(decodedText);
+        }).catch(() => {
+          qrScannerModal.style.display = 'none';
+          handleScannedQR(decodedText);
+        });
+      },
+      (errorMessage) => {}
+    ).catch((err) => {
+      alert('Gagal mengakses kamera: ' + err);
+      qrScannerModal.style.display = 'none';
+    });
+  });
+}
+
+if (qrScannerCloseBtn) {
+  qrScannerCloseBtn.addEventListener('click', () => {
+    if (html5QrCode) {
+      html5QrCode.stop().catch(() => {}).finally(() => {
+        qrScannerModal.style.display = 'none';
+      });
+    } else {
+      qrScannerModal.style.display = 'none';
+    }
+  });
+}
+
+function handleScannedQR(text) {
+  let target = text.trim();
+  if (target.startsWith('citcat:add:')) {
+    target = target.replace('citcat:add:', '');
+  }
+  if (!target) return;
+  if (target === myUsername) {
+    alert('Ini adalah QR code Anda sendiri.');
+    return;
+  }
+  searchInput.value = target;
+  socket.emit('search-user', { targetUsername: target }, (response) => {
+    if (response.success) {
+      searchedUser = response.user;
+      foundUsername.textContent = searchedUser.username;
+      searchResultBox.style.display = 'flex';
+      addContactBtn.click();
+    } else {
+      alert(response.error || 'Pengguna dari QR tidak ditemukan.');
+    }
+  });
+}
