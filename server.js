@@ -4,11 +4,13 @@ const { Server } = require('socket.io');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const os = require('os');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
@@ -19,6 +21,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
     console.error('Error opening database', err.message);
   } else {
     console.log('Connected to SQLite database.');
+    db.configure('busyTimeout', 10000);
+    db.run('PRAGMA journal_mode = WAL;');
     db.serialize(() => {
       // Create tables
       db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -197,31 +201,105 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Add Contact explicitly (Sends contact request)
-  socket.on('add-contact', ({ targetUsername }, callback) => {
-    if (!socket.username || !targetUsername) return callback({ success: false, error: 'Invalid data.' });
-    if (targetUsername === socket.username) return callback({ success: false, error: 'Tidak dapat menambahkan diri sendiri.' });
+  // Add Contact explicitly (Sends contact request or auto-accepts if mutual)
+  socket.on('add-contact', ({ username, targetUsername }, callback) => {
+    console.log('[DEBUG add-contact] Requested by username:', username, 'socket.username:', socket.username, 'targetUsername:', targetUsername);
+    const currentUsername = socket.username || username;
+    if (currentUsername && !socket.username) {
+      socket.username = currentUsername;
+    }
+    if (!currentUsername || !targetUsername) {
+      console.log('[DEBUG add-contact] Failed: missing currentUsername or targetUsername');
+      return callback({ success: false, error: 'Invalid data.' });
+    }
+    if (targetUsername === currentUsername) {
+      console.log('[DEBUG add-contact] Failed: cannot add self');
+      return callback({ success: false, error: 'Tidak dapat menambahkan diri sendiri.' });
+    }
 
     db.get(`SELECT username, online, avatar, socket_id FROM users WHERE username = ?`, [targetUsername], (err, row) => {
-      if (!row) return callback({ success: false, error: 'Pengguna tidak ditemukan.' });
+      if (err) {
+        console.error('[DEBUG add-contact] DB error fetching target user:', err);
+        return callback({ success: false, error: 'Database error.' });
+      }
+      if (!row) {
+        console.log('[DEBUG add-contact] Failed: target user not found:', targetUsername);
+        return callback({ success: false, error: 'Pengguna tidak ditemukan.' });
+      }
 
-      db.get(`SELECT status FROM contacts WHERE (user = ? AND contact = ?) OR (user = ? AND contact = ?)`, 
-        [socket.username, targetUsername, targetUsername, socket.username], (relErr, relRow) => {
-        if (relRow) {
-          if (relRow.status === 'accepted') {
-            return callback({ success: false, error: 'Sudah menjadi kontak.' });
-          } else {
-            return callback({ success: false, error: 'Permintaan kontak sudah dikirim / pending.' });
+      db.all(`SELECT user, contact, status FROM contacts WHERE (user = ? AND contact = ?) OR (user = ? AND contact = ?)`, 
+        [currentUsername, targetUsername, targetUsername, currentUsername], (relErr, relRows) => {
+        if (relErr) {
+          console.error('[DEBUG add-contact] DB error fetching relation:', relErr);
+          if (relErr.code === 'SQLITE_CONSTRAINT') {
+            return callback({ success: false, error: 'Kontak sudah ada dalam daftar.' });
           }
+          return callback({ success: false, error: 'Database error.' });
+        }
+        
+        const rows = relRows || [];
+        const currentToTarget = rows.find(r => r.user === currentUsername && r.contact === targetUsername);
+        const targetToCurrent = rows.find(r => r.user === targetUsername && r.contact === currentUsername);
+
+        if ((currentToTarget && currentToTarget.status === 'accepted') || (targetToCurrent && targetToCurrent.status === 'accepted')) {
+          console.log('[DEBUG add-contact] Failed: already accepted contacts');
+          return callback({ success: false, error: 'Kontak sudah ada dalam daftar.' });
         }
 
-        db.run(`INSERT INTO contacts (user, contact, status) VALUES (?, ?, 'pending')`, [targetUsername, socket.username], (insErr) => {
+        if (currentToTarget && currentToTarget.status === 'pending') {
+          console.log('[DEBUG add-contact] Failed: request already pending from current user');
+          return callback({ success: false, error: 'Permintaan kontak sudah dikirim sebelumnya.' });
+        }
+
+        if (targetToCurrent && targetToCurrent.status === 'pending') {
+          db.run(`INSERT OR REPLACE INTO contacts (user, contact, status) VALUES (?, ?, 'accepted')`, [currentUsername, targetUsername], (updErr) => {
+            if (updErr) {
+              console.error('[DEBUG add-contact] Update status error:', updErr);
+              if (updErr.code === 'SQLITE_CONSTRAINT') {
+                return callback({ success: false, error: 'Kontak sudah ada dalam daftar.' });
+              }
+              return callback({ success: false, error: 'Gagal memperbarui status kontak.' });
+            }
+            db.run(`INSERT OR REPLACE INTO contacts (user, contact, status) VALUES (?, ?, 'accepted')`, [targetUsername, currentUsername], (insRevErr) => {
+              if (insRevErr) {
+                console.error('[DEBUG add-contact] Reverse insert error:', insRevErr);
+                if (insRevErr.code === 'SQLITE_CONSTRAINT') {
+                  return callback({ success: false, error: 'Kontak sudah ada dalam daftar.' });
+                }
+                return callback({ success: false, error: 'Gagal menghubungkan kontak.' });
+              }
+              if (row.socket_id) {
+                db.get(`SELECT avatar FROM users WHERE username = ?`, [currentUsername], (myErr, myRow) => {
+                  io.to(row.socket_id).emit('contact-approved', { username: currentUsername, avatar: myRow ? myRow.avatar : null });
+                });
+              }
+              db.get(`SELECT avatar FROM users WHERE username = ?`, [targetUsername], (avErr, avRow) => {
+                console.log('[DEBUG add-contact] Success mutual auto-accept between', currentUsername, 'and', targetUsername);
+                callback({ 
+                  success: true, 
+                  message: 'Kontak berhasil terhubung!',
+                  user: { username: targetUsername, online: row.online, avatar: avRow ? avRow.avatar : null }
+                });
+              });
+            });
+          });
+          return;
+        }
+
+        db.run(`INSERT OR REPLACE INTO contacts (user, contact, status) VALUES (?, ?, 'pending')`, [targetUsername, currentUsername], (insErr) => {
           if (!insErr) {
             if (row.socket_id) {
-              io.to(row.socket_id).emit('contact-request', { username: socket.username, avatar: socket.avatar || null });
+              db.get(`SELECT avatar FROM users WHERE username = ?`, [currentUsername], (myErr, myRow) => {
+                io.to(row.socket_id).emit('contact-request', { username: currentUsername, avatar: myRow ? myRow.avatar : null });
+              });
             }
+            console.log('[DEBUG add-contact] Success pending request sent from', currentUsername, 'to', targetUsername);
             callback({ success: true, message: 'Permintaan kontak berhasil dikirim.' });
           } else {
+            console.error('[DEBUG add-contact] Add contact insert error:', insErr);
+            if (insErr.code === 'SQLITE_CONSTRAINT') {
+              return callback({ success: false, error: 'Kontak sudah ada dalam daftar.' });
+            }
             callback({ success: false, error: 'Gagal mengirim permintaan kontak.' });
           }
         });

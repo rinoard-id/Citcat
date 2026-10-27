@@ -5,6 +5,22 @@ let activeRecipient = null;
 const conversations = {}; // username -> { messages: [], online: boolean, avatar: string, unread: 0 }
 let pendingRequests = [];
 
+socket.on('connect', () => {
+  const savedUsername = localStorage.getItem('citcat_username');
+  const savedPassword = localStorage.getItem('citcat_password');
+  if (savedUsername && savedPassword) {
+    socket.emit('register-username', { username: savedUsername, password: savedPassword }, (res) => {
+      if (res.success) {
+        myUsername = res.username;
+        if (myUsernameEl) myUsernameEl.textContent = myUsername;
+        if (loginOverlay && loginOverlay.style.display !== 'none') {
+          loginOverlay.style.display = 'none';
+        }
+      }
+    });
+  }
+});
+
 // Contact requests UI elements
 const pendingRequestsContainer = document.getElementById('pending-requests-container');
 const pendingRequestsList = document.getElementById('pending-requests-list');
@@ -364,24 +380,28 @@ searchForm.addEventListener('submit', (e) => {
 
 addContactBtn.addEventListener('click', () => {
   if (!searchedUser) return;
-  socket.emit('add-contact', { targetUsername: searchedUser.username }, (res) => {
+  socket.emit('add-contact', { username: myUsername, targetUsername: searchedUser.username }, (res) => {
     searchResultBox.style.display = 'none';
     searchInput.value = '';
     if (res.success) {
-      const u = res.user;
-      if (!conversations[u.username]) {
-        conversations[u.username] = {
-          messages: [],
-          online: u.online === 1,
-          avatar: u.avatar,
-          unread: 0
-        };
+      if (res.user) {
+        const u = res.user;
+        if (!conversations[u.username]) {
+          conversations[u.username] = {
+            messages: [],
+            online: u.online === 1,
+            avatar: u.avatar,
+            unread: 0
+          };
+        }
+        renderConversations();
+        alert(`Kontak ${u.username} berhasil terhubung!`);
+        openChat(u.username);
+      } else {
+        alert(res.message || `Permintaan kontak berhasil dikirim ke ${searchedUser.username} (Menunggu persetujuan).`);
       }
-      renderConversations();
-      alert(`Kontak ${u.username} berhasil ditambahkan!`);
-      openChat(u.username);
     } else {
-      alert(res.error || 'Gagal menambahkan kontak.');
+      alert(res.error || 'Gagal mengirim permintaan kontak.');
     }
   });
 });
@@ -1681,7 +1701,7 @@ if (nearbyBtn) {
       }
       users.forEach(u => {
         const div = document.createElement('div');
-        div.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.03); padding: 10px 12px; border-radius: 10px;';
+        div.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0, 0, 0, 0.03); padding: 10px 12px; border-radius: 10px;';
         
         const left = document.createElement('div');
         left.style.cssText = 'display: flex; align-items: center; gap: 10px;';
@@ -1698,7 +1718,7 @@ if (nearbyBtn) {
         const info = document.createElement('div');
         info.innerHTML = `
           <div style="font-weight: 600; font-size: 0.95rem; color: var(--ios-text-dark);">${escapeHtml(u.username)}</div>
-          <div style="font-size: 0.75rem; color: var(--ios-orange);"><i class="fa-solid fa-location-dot"></i> ~${u.distance} • Status: ${escapeHtml(u.status_text || 'Available')}</div>
+          <div style="font-size: 0.75rem; color: var(--ios-text-light);"><i class="fa-solid fa-location-dot"></i> ~${u.distance} • Status: ${escapeHtml(u.status_text || 'Available')}</div>
         `;
         left.appendChild(av);
         left.appendChild(info);
@@ -1708,7 +1728,7 @@ if (nearbyBtn) {
         addBtn.style.cssText = 'width: auto; height: 32px; padding: 0 12px; font-size: 0.8rem; border-radius: 8px;';
         addBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i> Tambah';
         addBtn.onclick = () => {
-          socket.emit('add-contact', { targetUsername: u.username }, (res) => {
+          socket.emit('add-contact', { username: myUsername, targetUsername: u.username }, (res) => {
             if (res.success) {
               alert(`Permintaan kontak dikirim ke ${u.username} (Menunggu persetujuan).`);
               addBtn.disabled = true;
