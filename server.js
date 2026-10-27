@@ -31,7 +31,25 @@ const db = new sqlite3.Database(dbPath, (err) => {
       )`, () => {
         db.run(`ALTER TABLE users ADD COLUMN password TEXT`, () => {});
         db.run(`ALTER TABLE users ADD COLUMN avatar TEXT`, () => {});
+        db.run(`ALTER TABLE users ADD COLUMN status_text TEXT DEFAULT 'Available'`, () => {});
       });
+
+      db.run(`CREATE TABLE IF NOT EXISTS groups (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        creator TEXT,
+        members TEXT
+      )`);
+
+      db.run(`CREATE TABLE IF NOT EXISTS group_messages (
+        id TEXT PRIMARY KEY,
+        group_id TEXT,
+        sender TEXT,
+        message TEXT,
+        timestamp TEXT,
+        fileType TEXT,
+        fileName TEXT
+      )`);
 
       db.run(`CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
@@ -386,6 +404,82 @@ io.on('connection', (socket) => {
       });
       callback({ success: true });
     });
+  });
+
+  // Update user status (BBM-style)
+  socket.on('update-status', ({ statusText }, callback) => {
+    if (!socket.username) return callback({ success: false });
+    db.run(`UPDATE users SET status_text = ? WHERE username = ?`, [statusText, socket.username], (err) => {
+      if (!err) {
+        socket.broadcast.emit('user-status-updated', { username: socket.username, statusText });
+        callback({ success: true });
+      } else {
+        callback({ success: false });
+      }
+    });
+  });
+
+  // Get nearby users (People Nearby)
+  socket.on('get-nearby-users', (callback) => {
+    if (!socket.username) return callback([]);
+    db.all(`SELECT username, avatar, status_text, online FROM users WHERE username != ?`, [socket.username], (err, rows) => {
+      if (err) return callback([]);
+      const nearby = (rows || []).map((u, idx) => ({
+        ...u,
+        distance: (0.1 + (idx * 0.4) + (Math.random() * 0.3)).toFixed(1) + ' km'
+      }));
+      callback(nearby);
+    });
+  });
+
+  // Create group
+  socket.on('create-group', ({ name, members }, callback) => {
+    if (!socket.username) return callback({ success: false, error: 'Unauthorized' });
+    if (!name || !members || members.length < 2) {
+      return callback({ success: false, error: 'Grup harus memiliki nama dan minimal 2 anggota.' });
+    }
+    const groupId = 'group_' + Math.random().toString(36).substring(2, 11);
+    const allMembers = JSON.stringify([...members, socket.username]);
+
+    db.run(`INSERT INTO groups (id, name, creator, members) VALUES (?, ?, ?, ?)`, [groupId, name, socket.username, allMembers], (err) => {
+      if (err) {
+        return callback({ success: false, error: 'Gagal membuat grup.' });
+      }
+      callback({ success: true, group: { id: groupId, name, creator: socket.username, members: JSON.parse(allMembers) } });
+    });
+  });
+
+  // Send group message
+  socket.on('send-group-message', ({ groupId, message, messageId, fileType, fileName }, callback) => {
+    if (!socket.username) return;
+    const timestamp = new Date().toISOString();
+    db.run(`INSERT INTO group_messages (id, group_id, sender, message, timestamp, fileType, fileName) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [messageId, groupId, socket.username, message, timestamp, fileType || null, fileName || null], (err) => {
+        if (!err) {
+          db.get(`SELECT members FROM groups WHERE id = ?`, [groupId], (err2, row) => {
+            if (row && row.members) {
+              const members = JSON.parse(row.members);
+              members.forEach(member => {
+                if (member !== socket.username) {
+                  db.get(`SELECT socket_id FROM users WHERE username = ?`, [member], (err3, uRow) => {
+                    if (uRow && uRow.socket_id) {
+                      io.to(uRow.socket_id).emit('receive-group-message', {
+                        id: messageId,
+                        groupId,
+                        sender: socket.username,
+                        message,
+                        timestamp,
+                        fileType,
+                        fileName
+                      });
+                    }
+                  });
+                }
+              });
+            }
+          });
+        }
+      });
   });
 
   // Mark messages as read

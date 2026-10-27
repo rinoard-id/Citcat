@@ -323,8 +323,10 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(20px);
+  background-color: #efeae2;
+  background-image: radial-gradient(#d1ccc0 0.75px, transparent 0.75px), radial-gradient(#d1ccc0 0.75px, #efeae2 0.75px);
+  background-size: 30px 30px;
+  background-position: 0 0, 15px 15px;
 }
 
 .chat-empty-state {
@@ -754,8 +756,8 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(30px) saturate(180%);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(25px) saturate(180%);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -1043,4 +1045,59 @@ body {
 .delete-msg-btn:hover {
   opacity: 1;
   color: #FF3B30;
+}
+
+/* iOS Liquid Glass & Smooth Animations */
+.call-overlay, .login-overlay, .story-modal {
+  backdrop-filter: blur(25px) saturate(180%);
+  transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  animation: iosFadeIn 0.2s ease-out;
+}
+
+.call-card {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(35px) saturate(200%);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+  animation: iosScaleIn 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+@keyframes iosFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes iosScaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Compact iOS Buttons */
+#open-create-group-btn, #update-status-btn, .call-btn, button[type="submit"] {
+  transition: all 0.2s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+button:active, .call-btn:active {
+  transform: scale(0.96);
+}
+
+#open-create-group-btn {
+  padding: 8px 14px;
+  font-size: 0.9rem;
+  border-radius: 10px;
+  font-weight: 600;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+#update-status-btn {
+  padding: 0 14px;
+  font-size: 0.85rem;
+  border-radius: 8px;
+  height: 36px;
+  font-weight: 600;
 }

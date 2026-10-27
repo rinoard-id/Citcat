@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Citcat Web Chat</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
@@ -69,26 +72,84 @@
     </div>
   </div>
 
-  <!-- Contact Info Modal (WhatsApp Style) -->
+  <!-- Contact Info Modal (Friend Profile) -->
   <div id="contact-info-modal" class="call-overlay" style="display: none;">
-    <div class="call-card" style="max-width: 420px; text-align: center; max-height: 85vh; overflow-y: auto;">
-      <div class="call-avatar" id="info-avatar" style="margin: 0 auto;">C</div>
-      <h3 id="info-username" style="margin-top: 10px;">Username</h3>
-      <p id="info-status" style="color: #34C759;">online</p>
+    <div class="call-card" style="max-width: 340px; text-align: center; position: relative; padding: 24px; overflow: hidden; background: rgba(255, 255, 255, 0.92);">
+      <button type="button" id="info-close-btn" style="position: absolute; top: 12px; right: 12px; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--ios-text-light);" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
 
-      <div style="width: 100%; text-align: center; margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 15px;">
-        <h4 style="font-size: 0.95rem; margin-bottom: 8px; color: #EBEBF5;">QR Code Kontak</h4>
-        <div id="info-qrcode" style="display: inline-block; background: white; padding: 10px; border-radius: 8px;"></div>
+      <div class="call-avatar" id="info-avatar" style="width: 80px; height: 80px; font-size: 2rem; margin: 0 auto 8px auto;">C</div>
+      <h3 id="info-username" style="margin-top: 4px; font-size: 1.2rem; color: var(--ios-text-dark); font-weight: 700;">Username</h3>
+      <p id="info-status" style="color: #34C759; margin-bottom: 12px; font-size: 0.85rem; font-weight: 500;">online</p>
+
+      <div style="width: 100%; text-align: center; border-top: 1px solid var(--ios-border); padding-top: 10px; margin-top: 4px;">
+        <div style="font-size: 0.85rem; color: var(--ios-text-light); margin-bottom: 6px; font-weight: 600;">QR Code Kontak</div>
+        <div id="info-qrcode" style="display: inline-block; background: white; padding: 6px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);"></div>
       </div>
 
-      <div style="width: 100%; text-align: left; margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.15); padding-top: 15px;">
-        <h4 style="font-size: 1rem; margin-bottom: 8px; color: #EBEBF5;">Media & File Bersama</h4>
-        <div id="info-media-gallery" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 160px; overflow-y: auto;">
+      <div style="width: 100%; text-align: left; margin-top: 12px; border-top: 1px solid var(--ios-border); padding-top: 10px;">
+        <div style="font-size: 0.85rem; color: var(--ios-text-light); margin-bottom: 6px; font-weight: 600;">Media Bersama</div>
+        <div id="info-media-gallery" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; max-height: 110px; overflow-y: auto;">
           <!-- Shared media items -->
         </div>
       </div>
+    </div>
+  </div>
 
-      <button type="button" id="info-close-btn" class="call-btn reject" style="width: 120px; border-radius: 12px; font-size:1rem; margin: 15px auto 0 auto;" title="Tutup">Tutup</button>
+  <!-- Nearby Contacts Modal (People Nearby) -->
+  <div id="nearby-modal" class="call-overlay" style="display: none;">
+    <div class="call-card" style="max-width: 440px; max-height: 80vh; overflow-y: auto;">
+      <h3><i class="fa-solid fa-compass"></i> Teman di Sekitar (Radius)</h3>
+      <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">Pengguna Citcat yang berada di sekitar Anda. Kirim permintaan kontak untuk terhubung.</p>
+      <div id="nearby-users-list" style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 15px; text-align: left;">
+        <!-- Rendered via JS -->
+      </div>
+      <button type="button" id="nearby-close-btn" class="call-btn reject" style="width: 120px; border-radius: 12px; font-size:1rem; margin: 0 auto;">Tutup</button>
+    </div>
+  </div>
+
+  <!-- Create Group Modal -->
+  <div id="create-group-modal" class="call-overlay" style="display: none;">
+    <div class="call-card" style="max-width: 360px; text-align: left; padding: 24px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(35px);">
+      <h3 style="color: var(--ios-text-dark); margin-bottom: 12px; font-size: 1.2rem; text-align: center;"><i class="fa-solid fa-users"></i> Buat Grup Baru</h3>
+      <input type="text" id="group-name-input" placeholder="Nama Grup..." style="width: 100%; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--ios-border); margin-bottom: 12px; font-size: 0.95rem; outline: none; background: #fff; color: var(--ios-text-dark);" autocomplete="off">
+      <div style="font-size: 0.85rem; font-weight: 600; color: var(--ios-text-light); margin-bottom: 6px;">Pilih Anggota:</div>
+      <div id="group-members-select-list" style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; margin-bottom: 16px; padding: 2px;">
+        <!-- Rendered via JS -->
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: center;">
+        <button type="button" id="group-create-submit-btn" class="call-btn accept" style="width: 120px; height: 36px; border-radius: 10px; font-size: 0.9rem; background: var(--ios-blue);">Buat</button>
+        <button type="button" id="group-create-close-btn" class="call-btn reject" style="width: 110px; height: 36px; border-radius: 10px; font-size: 0.9rem; background: #8E8E93;">Batal</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- My Profile Modal -->
+  <div id="my-profile-modal" class="call-overlay" style="display: none;">
+    <div class="call-card" style="max-width: 340px; text-align: center; position: relative; padding: 24px; overflow: hidden; background: rgba(255, 255, 255, 0.92);">
+      <button type="button" id="my-profile-top-close-btn" style="position: absolute; top: 12px; right: 12px; background: none; border: none; font-size: 1.2rem; cursor: pointer; color: var(--ios-text-light);" title="Tutup"><i class="fa-solid fa-xmark"></i></button>
+
+      <!-- Avatar with Edit Pencil Badge -->
+      <div style="position: relative; width: 80px; height: 80px; margin: 0 auto 8px auto;">
+        <div class="call-avatar" id="my-profile-avatar" style="width: 80px; height: 80px; font-size: 2rem;">U</div>
+        <button type="button" id="change-avatar-btn" style="position: absolute; bottom: 0; right: 0; width: 28px; height: 28px; border-radius: 50%; background: var(--ios-blue); color: white; border: 2px solid white; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.15);" title="Ganti Foto"><i class="fa-solid fa-pencil"></i></button>
+      </div>
+
+      <h3 id="my-profile-username" style="margin-top: 4px; font-size: 1.2rem; color: var(--ios-text-dark); font-weight: 700;">Username</h3>
+      <p id="my-profile-status" style="color: #34C759; margin-bottom: 12px; font-size: 0.85rem; font-weight: 500;">Online</p>
+
+      <div style="width: 100%; text-align: center; border-top: 1px solid var(--ios-border); padding-top: 10px; margin-top: 4px;">
+        <div style="font-size: 0.85rem; color: var(--ios-text-light); margin-bottom: 6px; font-weight: 600;">QR Code Kontak</div>
+        <div id="my-profile-qrcode" style="display: inline-block; background: white; padding: 6px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.06);"></div>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+        <div>
+          <button type="button" id="native-share-btn" style="background: none; border: 1px solid var(--ios-border); color: var(--ios-blue); padding: 6px 16px; border-radius: 20px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s;" title="Bagikan Kontak"><i class="fa-solid fa-share-nodes"></i> Bagikan</button>
+        </div>
+        <div style="border-top: 1px solid var(--ios-border); padding-top: 10px; margin-top: 6px;">
+          <button type="button" id="logout-btn" style="background: none; border: 1px solid #FF3B30; color: #FF3B30; width: 100%; height: 34px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;" title="Keluar"><i class="fa-solid fa-right-from-bracket"></i> Keluar</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -110,17 +171,18 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <div class="user-profile">
-          <div class="avatar" id="my-avatar" style="cursor: pointer;" title="Klik untuk ganti foto profil">U</div>
+        <div class="user-profile" id="user-profile-btn" style="cursor: pointer;" title="Klik untuk lihat profil & share kontak">
+          <div class="avatar" id="my-avatar" title="Klik untuk ganti foto profil">U</div>
           <div class="user-meta">
             <span id="my-username" class="my-name">Username</span>
             <span class="status-online-text">Online</span>
           </div>
         </div>
         <div class="sidebar-actions" style="display: flex; gap: 6px; align-items: center;">
+          <button id="offline-toggle-btn" class="icon-btn" title="Toggle Mode Offline / Off-Grid P2P"><i class="fa-solid fa-wifi"></i></button>
+          <button id="header-notif-btn" class="icon-btn" title="Notifikasi Pesan Belum Dibaca" style="position: relative;"><i class="fa-solid fa-bell"></i><span id="header-notif-badge" style="position: absolute; top: 2px; right: 2px; display: none; background: #FF3B30; color: white; width: 16px; height: 16px; border-radius: 50%; font-size: 0.65rem; align-items: center; justify-content: center; font-weight: 700;">0</span></button>
           <button id="broadcast-btn" class="icon-btn" title="Broadcast Chat"><i class="fa-solid fa-bullhorn"></i></button>
           <button id="trash-btn" class="icon-btn" title="Trash / Sampah"><i class="fa-solid fa-trash"></i></button>
-          <button id="logout-btn" class="logout-btn" title="Keluar"><i class="fa-solid fa-right-from-bracket"></i></button>
         </div>
       </div>
 
@@ -130,7 +192,8 @@
             <i class="fa-solid fa-magnifying-glass"></i>
             <input type="text" id="search-input" placeholder="Cari username..." autocomplete="off">
           </form>
-          <button type="button" id="scan-qr-btn" class="icon-btn" title="Scan QR Code" style="background: var(--ios-green); color: white; border-radius: 10px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><i class="fa-solid fa-qrcode"></i></button>
+          <button type="button" id="nearby-btn" title="Cari Teman di Sekitar" style="background: #FF9500 !important; color: white !important; border: none !important; border-radius: 10px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; font-size: 1.1rem;"><i class="fa-solid fa-compass" style="color: white !important;"></i></button>
+          <button type="button" id="scan-qr-btn" title="Scan QR Code" style="background: #34C759 !important; color: white !important; border: none !important; border-radius: 10px; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; font-size: 1.1rem;"><i class="fa-solid fa-qrcode" style="color: white !important;"></i></button>
         </div>
         <div id="search-result-box" style="display: none; padding: 10px; background: rgba(0,0,0,0.04); border-radius: 10px; margin-top: 8px; align-items: center; justify-content: space-between;">
           <span id="found-username" style="font-weight: 600; color: var(--ios-text-dark);"></span>
@@ -139,15 +202,50 @@
         <div id="search-error" class="search-error"></div>
       </div>
 
-      <div id="pending-requests-container" style="display: none; padding: 12px; background: rgba(52, 199, 89, 0.1); border-bottom: 1px solid var(--ios-border);">
-        <h4 style="font-size: 0.85rem; color: #2e7d32; margin-bottom: 8px;"><i class="fa-solid fa-user-clock"></i> Permintaan Kontak (<span id="pending-count">0</span>)</h4>
-        <div id="pending-requests-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+      <!-- Sidebar Tabs (Chat, Grup, Status) -->
+      <div class="sidebar-tabs" style="display: flex; border-bottom: 1px solid var(--ios-border); background: rgba(0,0,0,0.02);">
+        <button type="button" class="sidebar-tab active" data-target="chat-tab-pane" style="flex: 1; padding: 10px; background: none; border: none; font-weight: 600; font-size: 0.9rem; cursor: pointer; border-bottom: 2px solid var(--ios-blue); color: var(--ios-blue);">Chat <span id="chat-tab-badge" style="display: none; background: #FF3B30; color: white; padding: 1px 6px; border-radius: 10px; font-size: 0.75rem; margin-left: 4px;">0</span></button>
+        <button type="button" class="sidebar-tab" data-target="group-tab-pane" style="flex: 1; padding: 10px; background: none; border: none; font-weight: 600; font-size: 0.9rem; cursor: pointer; color: var(--ios-text-light);">Grup</button>
+        <button type="button" class="sidebar-tab" data-target="status-tab-pane" style="flex: 1; padding: 10px; background: none; border: none; font-weight: 600; font-size: 0.9rem; cursor: pointer; color: var(--ios-text-light);">Status</button>
       </div>
 
-      <div class="conversation-list-container">
-        <ul id="conversation-list" class="conversation-list">
-          <li class="no-conversations">Belum ada kontak. Cari & tambah username di atas.</li>
-        </ul>
+      <!-- Tab Panes Container -->
+      <div class="tab-panes-container" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+        <!-- Chat Tab Pane -->
+        <div id="chat-tab-pane" class="tab-pane active" style="display: flex; flex-direction: column; flex: 1;">
+          <div id="pending-requests-container" style="display: none; padding: 12px; background: rgba(52, 199, 89, 0.1); border-bottom: 1px solid var(--ios-border);">
+            <h4 style="font-size: 0.85rem; color: #2e7d32; margin-bottom: 8px;"><i class="fa-solid fa-user-clock"></i> Permintaan Kontak (<span id="pending-count">0</span>)</h4>
+            <div id="pending-requests-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
+          </div>
+          <div class="conversation-list-container">
+            <ul id="conversation-list" class="conversation-list">
+              <li class="no-conversations">Belum ada kontak. Cari & tambah username di atas.</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Group Tab Pane -->
+        <div id="group-tab-pane" class="tab-pane" style="display: none; flex-direction: column; flex: 1; padding: 12px;">
+          <button type="button" id="open-create-group-btn" class="call-btn accept" style="width: 100%; border-radius: 10px; font-size: 0.9rem; margin-bottom: 12px;"><i class="fa-solid fa-users-rectangle"></i> Buat Grup Baru</button>
+          <ul id="group-list" class="conversation-list" style="list-style: none; padding: 0;">
+            <li class="no-conversations">Belum ada grup. Buat grup dengan tombol di atas.</li>
+          </ul>
+        </div>
+
+        <!-- Status Tab Pane (BBM / WhatsApp style) -->
+        <div id="status-tab-pane" class="tab-pane" style="display: none; flex-direction: column; flex: 1; padding: 12px;">
+          <div style="background: rgba(0,0,0,0.03); padding: 12px; border-radius: 12px; margin-bottom: 15px;">
+            <h4 style="font-size: 0.9rem; margin-bottom: 8px; color: var(--ios-text-dark);">Status Saya:</h4>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="my-status-input" placeholder="Tulis status Anda (cth: Available, Sibuk)..." style="flex: 1; padding: 10px; border-radius: 8px; border: 1px solid var(--ios-border); background: white; font-size: 0.9rem; outline: none;" autocomplete="off">
+              <button type="button" id="update-status-btn" class="call-btn accept" style="width: auto; padding: 0 14px; font-size: 0.85rem; border-radius: 8px;">Update</button>
+            </div>
+          </div>
+          <h4 style="font-size: 0.9rem; margin-bottom: 8px; color: var(--ios-text-dark);">Pembaruan Status (Kontak & Saya):</h4>
+          <ul id="contact-statuses-list" style="list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; max-height: 350px;">
+            <li style="color: var(--ios-text-light); font-size: 0.85rem;">Belum ada status.</li>
+          </ul>
+        </div>
       </div>
     </aside>
 
@@ -238,6 +336,7 @@
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
+  <script src="offgrid-p2p.js"></script>
   <script src="script.js"></script>
 </body>
 </html>

@@ -207,6 +207,14 @@ const menuViewProfile = document.getElementById('menu-view-profile');
 const menuClearChat = document.getElementById('menu-clear-chat');
 const menuViewTrash = document.getElementById('menu-view-trash');
 
+const headerNotifBtn = document.getElementById('header-notif-btn');
+if (headerNotifBtn) {
+  headerNotifBtn.addEventListener('click', () => {
+    const chatTabBtn = document.querySelector('.sidebar-tab[data-target="chat-tab-pane"]');
+    if (chatTabBtn) chatTabBtn.click();
+  });
+}
+
 logoutBtn.addEventListener('click', () => {
   localStorage.removeItem('citcat_username');
   localStorage.removeItem('citcat_password');
@@ -285,10 +293,13 @@ function loginWithCredentials(username, password) {
   });
 }
 
-// Profile picture upload
-myAvatarEl.addEventListener('click', () => {
-  avatarFileInput.click();
-});
+// Open My Profile Modal on avatar click
+if (myAvatarEl) {
+  myAvatarEl.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openMyProfile();
+  });
+}
 
 avatarFileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
@@ -298,6 +309,11 @@ avatarFileInput.addEventListener('change', (e) => {
     const avatarUrl = evt.target.result;
     myAvatarEl.style.backgroundImage = `url(${avatarUrl})`;
     myAvatarEl.textContent = '';
+    const myProfileAvatarEl = document.getElementById('my-profile-avatar');
+    if (myProfileAvatarEl) {
+      myProfileAvatarEl.style.backgroundImage = `url(${avatarUrl})`;
+      myProfileAvatarEl.textContent = '';
+    }
     localStorage.setItem('citcat_avatar', avatarUrl);
     socket.emit('update-avatar', { avatar: avatarUrl }, (res) => {
       if (!res.success) {
@@ -426,6 +442,20 @@ backBtn.addEventListener('click', () => {
 // Render conversation list in sidebar
 function renderConversations() {
   const usernames = Object.keys(conversations);
+
+  const totalUnread = Object.values(conversations).reduce((sum, c) => sum + (c.unread || 0), 0);
+  const chatTabBadge = document.getElementById('chat-tab-badge');
+  const headerNotifBadge = document.getElementById('header-notif-badge');
+
+  if (chatTabBadge) {
+    chatTabBadge.textContent = totalUnread;
+    chatTabBadge.style.display = totalUnread > 0 ? 'inline-block' : 'none';
+  }
+  if (headerNotifBadge) {
+    headerNotifBadge.textContent = totalUnread;
+    headerNotifBadge.style.display = totalUnread > 0 ? 'flex' : 'none';
+  }
+
   if (usernames.length === 0) {
     conversationListEl.innerHTML = '<li class="no-conversations">Belum ada kontak. Cari & tambah username di atas.</li>';
     return;
@@ -466,10 +496,14 @@ function renderConversations() {
 
 // Render messages in active chat
 function renderMessages() {
-  if (!activeRecipient || !conversations[activeRecipient]) return;
+  if (!activeRecipient) return;
+  const isGroup = activeRecipient.startsWith('group:');
+  const messages = isGroup 
+    ? groups[activeRecipient.replace('group:', '')].messages 
+    : (conversations[activeRecipient] ? conversations[activeRecipient].messages : []);
+  if (!messages) return;
 
   messagesScroll.innerHTML = '';
-  const messages = conversations[activeRecipient].messages;
 
   messages.forEach((msg) => {
     const isSent = msg.sender === myUsername;
@@ -482,6 +516,8 @@ function renderMessages() {
       if (msg.status === 'read') statusText = ' • Dibaca';
       else statusText = ' • Terkirim';
     }
+
+    let senderLabel = (isGroup && !isSent) ? `<div style="font-size:0.75rem; font-weight:600; color:var(--ios-blue); margin-bottom:2px;">${escapeHtml(msg.sender)}</div>` : '';
 
     let contentHtml = '';
     if (msg.fileType === 'image' || (msg.message && msg.message.startsWith('data:image'))) {
@@ -499,27 +535,10 @@ function renderMessages() {
       }
     }
 
-    const deleteBtnHtml = `<button type="button" class="delete-msg-btn" title="Hapus pesan (Masuk ke Trash)"><i class="fa-solid fa-trash"></i></button>`;
-
     row.innerHTML = `
-      <div class="msg-bubble">${contentHtml} ${isSent ? deleteBtnHtml : ''}</div>
+      <div class="msg-bubble">${senderLabel}${contentHtml}</div>
       <div class="msg-meta">${timeStr}${statusText}</div>
     `;
-
-    const delBtn = row.querySelector('.delete-msg-btn');
-    if (delBtn) {
-      delBtn.addEventListener('click', () => {
-        if (confirm('Hapus pesan ini? Pesan akan dipindahkan ke Trash (otomatis terhapus permanen setelah 30 hari).')) {
-          socket.emit('delete-message', { messageId: msg.id }, (res) => {
-            if (res.success) {
-              row.remove();
-            } else {
-              alert(res.error || 'Gagal menghapus pesan.');
-            }
-          });
-        }
-      });
-    }
 
     messagesScroll.appendChild(row);
   });
@@ -533,8 +552,26 @@ messageForm.addEventListener('submit', (e) => {
   const text = messageInput.value.trim();
   if (!text || !activeRecipient) return;
 
+  const isGroup = activeRecipient.startsWith('group:');
   const messageId = 'msg_' + Math.random().toString(36).substring(2, 11);
   const timestamp = new Date().toISOString();
+
+  if (isGroup) {
+    const groupId = activeRecipient.replace('group:', '');
+    const messageObj = {
+      id: messageId,
+      groupId,
+      sender: myUsername,
+      message: text,
+      timestamp
+    };
+    groups[groupId].messages.push(messageObj);
+    messageInput.value = '';
+    emojiPicker.style.display = 'none';
+    renderMessages();
+    socket.emit('send-group-message', { groupId, message: text, messageId });
+    return;
+  }
 
   const messageObj = {
     id: messageId,
@@ -559,6 +596,30 @@ messageForm.addEventListener('submit', (e) => {
   });
 });
 
+// Request Notification Permission on load
+if (typeof Notification !== 'undefined' && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+  Notification.requestPermission();
+}
+
+function playNotificationSound() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+    osc.frequency.setValueAtTime(880, audioCtx.currentTime + 0.08); // A5
+    gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  } catch (e) {
+    // Audio context not allowed or supported without user interaction
+  }
+}
+
 // Receive message (Automatically adds sender to conversations/contacts if they chat us first)
 socket.on('receive-message', (msg) => {
   const peer = msg.sender === myUsername ? msg.recipient : msg.sender;
@@ -579,6 +640,13 @@ socket.on('receive-message', (msg) => {
     markMessagesRead(peer);
   } else {
     conversations[peer].unread += 1;
+    playNotificationSound();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && document.hidden) {
+      new Notification(`Pesan baru dari ${msg.sender}`, {
+        body: msg.message.startsWith('http') ? '[Media / Gambar]' : msg.message,
+        icon: 'https://cdn-icons-png.flaticon.com/512/1041/1041916.png'
+      });
+    }
   }
 
   renderConversations();
@@ -1193,7 +1261,7 @@ callRejectBtn.addEventListener('click', () => {
   endCall();
 });
 
-socket.on('call-ended', () => {
+socket.on('end-call', () => {
   endCall();
 });
 
@@ -1350,5 +1418,595 @@ function handleScannedQR(text) {
     } else {
       alert(response.error || 'Pengguna dari QR tidak ditemukan.');
     }
+  });
+}
+
+// ==========================================
+// Offline / Online Toggle (Off-Grid P2P) & My Profile Features
+// ==========================================
+let isOfflineMode = false;
+const offlineToggleBtn = document.getElementById('offline-toggle-btn');
+const statusOnlineText = document.querySelector('.status-online-text');
+
+if (offlineToggleBtn) {
+  offlineToggleBtn.addEventListener('click', async () => {
+    isOfflineMode = !isOfflineMode;
+    if (isOfflineMode) {
+      offlineToggleBtn.style.background = '#34C759';
+      offlineToggleBtn.style.color = 'white';
+      offlineToggleBtn.title = 'Mode Offline (Off-Grid P2P) Aktif - Klik untuk kembali online';
+      if (statusOnlineText) statusOnlineText.textContent = 'Offline (Off-Grid)';
+      if (window.offGridManager) {
+        const res = await window.offGridManager.toggleOffGrid(true, myUsername);
+        if (res && res.message) {
+          alert(res.message);
+        } else {
+          alert('Mode Off-Grid diaktifkan (Bluetooth LE / Wi-Fi Direct P2P).');
+        }
+      } else {
+        alert('Mode Offline diaktifkan.');
+      }
+    } else {
+      offlineToggleBtn.style.background = '';
+      offlineToggleBtn.style.color = '';
+      offlineToggleBtn.title = 'Toggle Mode Offline / Off-Grid P2P';
+      if (statusOnlineText) statusOnlineText.textContent = 'Online';
+      if (window.offGridManager) {
+        await window.offGridManager.toggleOffGrid(false, myUsername);
+      }
+      alert('Kembali ke Mode Online (Server).');
+    }
+  });
+}
+
+// My Profile & Contact Sharing Modal Elements
+const userProfileBtn = document.getElementById('user-profile-btn');
+const myProfileModal = document.getElementById('my-profile-modal');
+const myProfileCloseBtn = document.getElementById('my-profile-close-btn');
+const myProfileAvatar = document.getElementById('my-profile-avatar');
+const myProfileUsername = document.getElementById('my-profile-username');
+const myProfileStatus = document.getElementById('my-profile-status');
+const myProfileQrcode = document.getElementById('my-profile-qrcode');
+const myShareLinkInput = document.getElementById('my-share-link-input');
+const copyShareLinkBtn = document.getElementById('copy-share-link-btn');
+const nativeShareBtn = document.getElementById('native-share-btn');
+
+if (userProfileBtn) {
+  userProfileBtn.addEventListener('click', () => {
+    openMyProfile();
+  });
+}
+
+function openMyProfile() {
+  if (!myProfileModal) return;
+  myProfileModal.style.display = 'flex';
+  if (myProfileUsername) myProfileUsername.textContent = myUsername || 'Username';
+  if (myProfileStatus) {
+    myProfileStatus.textContent = isOfflineMode ? 'Offline (Off-Grid P2P)' : 'Online';
+    myProfileStatus.style.color = isOfflineMode ? '#FF9500' : '#34C759';
+  }
+
+  const savedAvatar = localStorage.getItem('citcat_avatar');
+  if (myProfileAvatar) {
+    if (savedAvatar) {
+      myProfileAvatar.style.backgroundImage = `url(${savedAvatar})`;
+      myProfileAvatar.textContent = '';
+    } else {
+      myProfileAvatar.style.backgroundImage = '';
+      myProfileAvatar.textContent = (myUsername || 'U').charAt(0).toUpperCase();
+    }
+  }
+
+  const shareText = `citcat:add:${myUsername}`;
+  if (myShareLinkInput) myShareLinkInput.value = shareText;
+
+  if (myProfileQrcode) {
+    myProfileQrcode.innerHTML = '';
+    if (typeof QRCode !== 'undefined') {
+      new QRCode(myProfileQrcode, {
+        text: shareText,
+        width: 140,
+        height: 140,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.H
+      });
+    }
+  }
+
+  // Populate My Media Gallery & Documents
+  const myMediaGallery = document.getElementById('my-media-gallery');
+  const myDocumentsList = document.getElementById('my-documents-list');
+
+  if (myMediaGallery) myMediaGallery.innerHTML = '';
+  if (myDocumentsList) myDocumentsList.innerHTML = '';
+
+  let allMedia = [];
+  let allDocs = [];
+
+  Object.keys(conversations).forEach(username => {
+    const msgs = conversations[username].messages || [];
+    msgs.forEach(m => {
+      if (m.fileType === 'image' || m.fileType === 'video' || (m.message && m.message.startsWith('data:image'))) {
+        allMedia.push(m);
+      } else if (m.fileType === 'file' || m.fileName) {
+        allDocs.push(m);
+      }
+    });
+  });
+
+  if (allMedia.length === 0) {
+    if (myMediaGallery) myMediaGallery.innerHTML = '<div style="grid-column: span 3; color: #8E8E93; font-size: 0.85rem;">Belum ada media.</div>';
+  } else {
+    allMedia.forEach(m => {
+      const item = document.createElement('div');
+      item.style.cssText = 'height: 65px; border-radius: 8px; overflow: hidden; background: #000;';
+      if (m.fileType === 'video' || m.message.startsWith('data:video')) {
+        item.innerHTML = `<video src="${m.message}" style="width:100%; height:100%; object-fit:cover;"></video>`;
+      } else {
+        item.innerHTML = `<img src="${m.message}" style="width:100%; height:100%; object-fit:cover;" alt="Media">`;
+      }
+      myMediaGallery.appendChild(item);
+    });
+  }
+
+  if (allDocs.length === 0) {
+    if (myDocumentsList) myDocumentsList.innerHTML = '<div style="color: #8E8E93; font-size: 0.85rem;">Belum ada dokumen.</div>';
+  } else {
+    allDocs.forEach(m => {
+      const item = document.createElement('div');
+      item.style.cssText = 'background: rgba(255,255,255,0.08); padding: 8px 10px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.85rem;';
+      item.innerHTML = `
+        <span style="color: white; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px;"><i class="fa-solid fa-file"></i> ${escapeHtml(m.fileName || 'Dokumen')}</span>
+        <a href="${escapeHtml(m.message)}" download="${escapeHtml(m.fileName || 'file')}" style="color: #34C759; text-decoration: none;"><i class="fa-solid fa-download"></i></a>
+      `;
+      myDocumentsList.appendChild(item);
+    });
+  }
+}
+
+const changeAvatarBtn = document.getElementById('change-avatar-btn');
+if (changeAvatarBtn) {
+  changeAvatarBtn.addEventListener('click', () => {
+    avatarFileInput.click();
+  });
+}
+
+if (myProfileAvatar) {
+  myProfileAvatar.addEventListener('click', () => {
+    avatarFileInput.click();
+  });
+}
+
+if (myProfileCloseBtn) {
+  myProfileCloseBtn.addEventListener('click', () => {
+    myProfileModal.style.display = 'none';
+  });
+}
+
+if (copyShareLinkBtn) {
+  copyShareLinkBtn.addEventListener('click', () => {
+    if (myShareLinkInput) {
+      navigator.clipboard.writeText(myShareLinkInput.value).then(() => {
+        alert('Tautan kontak berhasil disalin ke clipboard!');
+      }).catch(() => {
+        myShareLinkInput.select();
+        document.execCommand('copy');
+        alert('Tautan kontak disalin!');
+      });
+    }
+  });
+}
+
+if (nativeShareBtn) {
+  nativeShareBtn.addEventListener('click', async () => {
+    const shareData = {
+      title: 'Citcat Contact',
+      text: `Ayo chat di Citcat! Tambahkan kontak saya dengan username: ${myUsername}`,
+      url: window.location.href
+    };
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData);
+      } catch (err) {
+        console.log('Share canceled or failed', err);
+      }
+    } else {
+      navigator.clipboard.writeText(`citcat:add:${myUsername}`);
+      alert('Web Share API tidak didukung browser ini. Kontak tersalin ke clipboard.');
+    }
+  });
+}
+
+// ==========================================
+// Sidebar Tabs, Groups, Nearby, & BBM Status Features
+// ==========================================
+
+// Tab Switching
+const sidebarTabs = document.querySelectorAll('.sidebar-tab');
+sidebarTabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    sidebarTabs.forEach(t => {
+      t.classList.remove('active');
+      t.style.borderBottom = 'none';
+      t.style.color = 'var(--ios-text-light)';
+    });
+    tab.classList.add('active');
+    tab.style.borderBottom = '2px solid var(--ios-blue)';
+    tab.style.color = 'var(--ios-blue)';
+
+    const targetId = tab.getAttribute('data-target');
+    document.querySelectorAll('.tab-pane').forEach(pane => {
+      pane.style.display = 'none';
+      pane.classList.remove('active');
+    });
+    const targetPane = document.getElementById(targetId);
+    if (targetPane) {
+      targetPane.style.display = 'flex';
+      targetPane.classList.add('active');
+    }
+  });
+});
+
+// Profile Modal Top Close & Click Outside
+const myProfileTopCloseBtn = document.getElementById('my-profile-top-close-btn');
+if (myProfileTopCloseBtn) {
+  myProfileTopCloseBtn.addEventListener('click', () => {
+    myProfileModal.style.display = 'none';
+  });
+}
+if (myProfileModal) {
+  myProfileModal.addEventListener('click', (e) => {
+    if (e.target === myProfileModal) {
+      myProfileModal.style.display = 'none';
+    }
+  });
+}
+
+// Nearby Contacts (People Nearby)
+const nearbyBtn = document.getElementById('nearby-btn');
+const nearbyModal = document.getElementById('nearby-modal');
+const nearbyCloseBtn = document.getElementById('nearby-close-btn');
+const nearbyUsersList = document.getElementById('nearby-users-list');
+
+if (nearbyBtn) {
+  nearbyBtn.addEventListener('click', () => {
+    nearbyModal.style.display = 'flex';
+    nearbyUsersList.innerHTML = '<div style="color:var(--ios-text-light); text-align:center;">Mencari pengguna di sekitar...</div>';
+    socket.emit('get-nearby-users', (users) => {
+      nearbyUsersList.innerHTML = '';
+      if (!users || users.length === 0) {
+        nearbyUsersList.innerHTML = '<div style="color:var(--ios-text-light); text-align:center;">Tidak ada pengguna lain di sekitar.</div>';
+        return;
+      }
+      users.forEach(u => {
+        const div = document.createElement('div');
+        div.style.cssText = 'display: flex; align-items: center; justify-content: space-between; background: rgba(0,0,0,0.03); padding: 10px 12px; border-radius: 10px;';
+        
+        const left = document.createElement('div');
+        left.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+        
+        const av = document.createElement('div');
+        av.className = 'avatar small';
+        if (u.avatar) {
+          av.style.backgroundImage = `url(${u.avatar})`;
+          av.textContent = '';
+        } else {
+          av.textContent = u.username.charAt(0).toUpperCase();
+        }
+
+        const info = document.createElement('div');
+        info.innerHTML = `
+          <div style="font-weight: 600; font-size: 0.95rem; color: var(--ios-text-dark);">${escapeHtml(u.username)}</div>
+          <div style="font-size: 0.75rem; color: var(--ios-orange);"><i class="fa-solid fa-location-dot"></i> ~${u.distance} • Status: ${escapeHtml(u.status_text || 'Available')}</div>
+        `;
+        left.appendChild(av);
+        left.appendChild(info);
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'call-btn accept';
+        addBtn.style.cssText = 'width: auto; height: 32px; padding: 0 12px; font-size: 0.8rem; border-radius: 8px;';
+        addBtn.innerHTML = '<i class="fa-solid fa-user-plus"></i> Tambah';
+        addBtn.onclick = () => {
+          socket.emit('add-contact', { targetUsername: u.username }, (res) => {
+            if (res.success) {
+              alert(`Permintaan kontak dikirim ke ${u.username} (Menunggu persetujuan).`);
+              addBtn.disabled = true;
+              addBtn.textContent = 'Menunggu';
+              addBtn.style.background = '#8E8E93';
+            } else {
+              alert(res.error || 'Gagal mengirim permintaan.');
+            }
+          });
+        };
+
+        div.appendChild(left);
+        div.appendChild(addBtn);
+        nearbyUsersList.appendChild(div);
+      });
+    });
+  });
+}
+
+if (nearbyCloseBtn) {
+  nearbyCloseBtn.addEventListener('click', () => {
+    nearbyModal.style.display = 'none';
+  });
+}
+if (nearbyModal) {
+  nearbyModal.addEventListener('click', (e) => {
+    if (e.target === nearbyModal) nearbyModal.style.display = 'none';
+  });
+}
+
+// Groups Feature
+const groups = {}; // groupId -> { name, members, messages: [] }
+const openCreateGroupBtn = document.getElementById('open-create-group-btn');
+const createGroupModal = document.getElementById('create-group-modal');
+const groupCreateCloseBtn = document.getElementById('group-create-close-btn');
+const groupCreateSubmitBtn = document.getElementById('group-create-submit-btn');
+const groupNameInput = document.getElementById('group-name-input');
+const groupMembersSelectList = document.getElementById('group-members-select-list');
+const groupList = document.getElementById('group-list');
+const selectedGroupMembers = new Set();
+
+if (openCreateGroupBtn) {
+  openCreateGroupBtn.addEventListener('click', () => {
+    const contactUsernames = Object.keys(conversations);
+    groupNameInput.value = '';
+    selectedGroupMembers.clear();
+    if (groupMembersSelectList) groupMembersSelectList.innerHTML = '';
+
+    if (contactUsernames.length === 0) {
+      if (groupMembersSelectList) groupMembersSelectList.innerHTML = '<div style="color:var(--ios-text-light); font-size:0.9rem; text-align:center; padding: 15px;">Belum ada kontak.</div>';
+    } else {
+      contactUsernames.forEach(username => {
+        const conv = conversations[username];
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-radius: 10px; cursor: pointer; background: rgba(0,0,0,0.02); transition: background 0.15s;';
+        
+        const left = document.createElement('div');
+        left.style.cssText = 'display: flex; align-items: center; gap: 10px;';
+        
+        const av = document.createElement('div');
+        av.className = 'avatar small';
+        if (conv && conv.avatar) {
+          av.style.backgroundImage = `url(${conv.avatar})`;
+          av.textContent = '';
+        } else {
+          av.textContent = username.charAt(0).toUpperCase();
+        }
+
+        const nameEl = document.createElement('span');
+        nameEl.style.cssText = 'font-weight: 600; font-size: 0.95rem; color: var(--ios-text-dark);';
+        nameEl.textContent = username;
+
+        left.appendChild(av);
+        left.appendChild(nameEl);
+
+        const checkIcon = document.createElement('i');
+        checkIcon.className = 'fa-solid fa-check';
+        checkIcon.style.cssText = 'color: var(--ios-blue); opacity: 0; font-size: 1.1rem; transition: opacity 0.15s;';
+
+        item.appendChild(left);
+        item.appendChild(checkIcon);
+
+        item.onclick = () => {
+          if (selectedGroupMembers.has(username)) {
+            selectedGroupMembers.delete(username);
+            item.style.background = 'rgba(0,0,0,0.02)';
+            checkIcon.style.opacity = '0';
+          } else {
+            selectedGroupMembers.add(username);
+            item.style.background = 'rgba(0, 122, 255, 0.1)';
+            checkIcon.style.opacity = '1';
+          }
+        };
+
+        if (groupMembersSelectList) groupMembersSelectList.appendChild(item);
+      });
+    }
+    createGroupModal.style.display = 'flex';
+  });
+}
+
+if (groupCreateCloseBtn) {
+  groupCreateCloseBtn.addEventListener('click', () => {
+    createGroupModal.style.display = 'none';
+  });
+}
+if (createGroupModal) {
+  createGroupModal.addEventListener('click', (e) => {
+    if (e.target === createGroupModal) createGroupModal.style.display = 'none';
+  });
+}
+
+if (groupCreateSubmitBtn) {
+  groupCreateSubmitBtn.addEventListener('click', () => {
+    const name = groupNameInput.value.trim();
+    if (!name) {
+      alert('Nama grup wajib diisi.');
+      return;
+    }
+    const selectedMembers = Array.from(selectedGroupMembers);
+    if (selectedMembers.length === 0) {
+      alert('Pilih minimal 1 kontak anggota untuk grup.');
+      return;
+    }
+
+    socket.emit('create-group', { name, members: selectedMembers }, (res) => {
+      if (res && res.success) {
+        const grp = res.group;
+        groups[grp.id] = { name: grp.name, members: grp.members, messages: [] };
+        renderGroups();
+        createGroupModal.style.display = 'none';
+        alert(`Grup "${grp.name}" berhasil dibuat!`);
+      } else {
+        alert((res && res.error) || 'Gagal membuat grup.');
+      }
+    });
+  });
+}
+
+function renderGroups() {
+  if (!groupList) return;
+  const groupIds = Object.keys(groups);
+  if (groupIds.length === 0) {
+    groupList.innerHTML = '<li class="no-conversations">Belum ada grup. Buat grup dengan tombol di atas.</li>';
+    return;
+  }
+  groupList.innerHTML = '';
+  groupIds.forEach(gid => {
+    const g = groups[gid];
+    const li = document.createElement('li');
+    li.className = 'conversation-item';
+    li.innerHTML = `
+      <div class="avatar small" style="background: var(--ios-blue); color: white;"><i class="fa-solid fa-users"></i></div>
+      <div class="conv-info">
+        <div class="conv-header-row">
+          <span class="conv-username">${escapeHtml(g.name)}</span>
+        </div>
+        <div class="conv-preview">${g.members.length} Anggota</div>
+      </div>
+    `;
+    li.addEventListener('click', () => {
+      openGroupChat(gid);
+    });
+    groupList.appendChild(li);
+  });
+}
+
+function openGroupChat(groupId) {
+  activeRecipient = 'group:' + groupId;
+  const g = groups[groupId];
+
+  chatEmptyState.style.display = 'none';
+  chatBox.style.display = 'flex';
+  activeUsernameEl.textContent = g.name;
+  activeStatusEl.textContent = `${g.members.length} Anggota`;
+  activeStatusEl.className = 'status-sub online';
+  activeAvatarEl.style.backgroundImage = '';
+  activeAvatarEl.innerHTML = '<i class="fa-solid fa-users" style="font-size: 1rem;"></i>';
+
+  if (window.innerWidth <= 768) {
+    sidebar.classList.add('hidden');
+    chatArea.classList.add('active');
+  }
+
+  renderMessages();
+}
+
+socket.on('receive-group-message', (msg) => {
+  const gid = msg.groupId;
+  if (!groups[gid]) {
+    groups[gid] = { name: 'Grup', members: [], messages: [] };
+  }
+  groups[gid].messages.push(msg);
+  if (activeRecipient === 'group:' + gid) {
+    renderMessages();
+  }
+  renderGroups();
+});
+
+// BBM / WhatsApp Status Feature
+const myStatusInput = document.getElementById('my-status-input');
+const updateStatusBtn = document.getElementById('update-status-btn');
+const contactStatusesList = document.getElementById('contact-statuses-list');
+const allStatuses = {}; // username -> statusText
+
+function handleUpdateStatus() {
+  const statusText = myStatusInput.value.trim();
+  if (!statusText) {
+    alert('Tulis status terlebih dahulu.');
+    return;
+  }
+  socket.emit('update-status', { statusText }, (res) => {
+    if (res && res.success) {
+      allStatuses[myUsername] = statusText;
+      renderContactStatuses();
+      myStatusInput.value = '';
+      alert('Status berhasil diperbarui!');
+    } else {
+      alert('Gagal memperbarui status.');
+    }
+  });
+}
+
+if (updateStatusBtn) {
+  updateStatusBtn.addEventListener('click', handleUpdateStatus);
+}
+
+if (myStatusInput) {
+  myStatusInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleUpdateStatus();
+    }
+  });
+}
+
+socket.on('user-status-updated', ({ username, statusText }) => {
+  allStatuses[username] = statusText;
+  renderContactStatuses();
+});
+
+function renderContactStatuses() {
+  if (!contactStatusesList) return;
+
+  if (myUsername && !allStatuses[myUsername]) {
+    allStatuses[myUsername] = 'Available';
+  }
+
+  const usernames = Object.keys(allStatuses);
+  if (usernames.length === 0) {
+    contactStatusesList.innerHTML = '<li style="color: var(--ios-text-light); font-size: 0.85rem;">Belum ada status.</li>';
+    return;
+  }
+
+  contactStatusesList.innerHTML = '';
+
+  // Render my status at the top
+  if (myUsername && allStatuses[myUsername]) {
+    const myLi = document.createElement('li');
+    myLi.style.cssText = 'background: rgba(0, 122, 255, 0.08); padding: 10px 12px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--ios-blue);';
+    myLi.innerHTML = `
+      <div>
+        <div style="font-weight: 600; font-size: 0.9rem; color: var(--ios-text-dark);">${escapeHtml(myUsername)} <span style="font-size: 0.75rem; color: var(--ios-blue); font-weight: normal;">(Status Saya)</span></div>
+        <div style="font-size: 0.85rem; color: var(--ios-text-dark); margin-top: 2px;">"${escapeHtml(allStatuses[myUsername])}"</div>
+      </div>
+    `;
+    contactStatusesList.appendChild(myLi);
+  }
+
+  // Render contacts' statuses with WhatsApp-style reply button
+  usernames.forEach(u => {
+    if (u === myUsername) return;
+    const st = allStatuses[u];
+    const li = document.createElement('li');
+    li.style.cssText = 'background: rgba(0,0,0,0.03); padding: 10px 12px; border-radius: 10px; display: flex; justify-content: space-between; align-items: center;';
+    
+    const infoDiv = document.createElement('div');
+    infoDiv.innerHTML = `
+      <div style="font-weight: 600; font-size: 0.9rem; color: var(--ios-text-dark);">${escapeHtml(u)}</div>
+      <div style="font-size: 0.85rem; color: var(--ios-blue); font-style: italic; margin-top: 2px;">"${escapeHtml(st)}"</div>
+    `;
+
+    const replyBtn = document.createElement('button');
+    replyBtn.className = 'call-btn accept';
+    replyBtn.style.cssText = 'width: auto; height: 30px; padding: 0 12px; font-size: 0.80rem; border-radius: 8px;';
+    replyBtn.innerHTML = '<i class="fa-solid fa-reply"></i> Balas';
+    replyBtn.onclick = () => {
+      // Switch to Chat tab
+      const chatTabBtn = document.querySelector('.sidebar-tab[data-target="chat-tab-pane"]');
+      if (chatTabBtn) chatTabBtn.click();
+
+      openChat(u);
+      messageInput.value = `Membalas status "${st}": `;
+      messageInput.focus();
+    };
+
+    li.appendChild(infoDiv);
+    li.appendChild(replyBtn);
+    contactStatusesList.appendChild(li);
   });
 }
